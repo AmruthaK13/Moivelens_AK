@@ -1,0 +1,258 @@
+---
+title: "Untitled"
+author: "Amrutha Killada"
+date: "5/12/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+Executive summary
+This project is for educational purposes as a submission for the course HarvardX: PH125.9x Data Science Capstone. The objective of the project is to train a machine learning algorithm that could predict movie ratings.
+
+```{r}
+#libraries
+library(dslabs)
+library(caret)
+library(tidyverse)
+library(ggplot2)
+library(data.table)
+library(dplyr)
+library(lubridate)
+```
+```{r}
+#Dataset
+#Movielens dataset
+dl <- tempfile()
+download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+ratings <- read.table(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                      col.names = c("userId", "movieId", "rating", "timestamp"))
+movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+colnames(movies) <- c("movieId", "title", "genres")
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(levels(movieId))[movieId],
+                                           title = as.character(title),
+                                           genres = as.character(genres))
+movielens <- left_join(ratings, movies, by = "movieId")
+```
+This loads the movielens dataset
+```{r}
+# Validation set will be 10% of MovieLens data
+set.seed(1)
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+# Make sure userId and movieId in validation set are also in edx set
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+# Add rows removed from validation set back into edx set
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+```
+Now we perform summary statistics on the dataset of Edx
+```{r}
+#first 6 rows with head function
+head(edx)
+```
+This shows that Edx contains "userId", "movieId", "rating", "timestamp","title","genres" in the data
+```{r}
+#summary statistics
+summary(edx)
+n_distinct(edx$movieId)
+n_distinct(edx$rating)
+n_distinct(edx$userId)
+n_distinct(edx$genres)
+med_rating <- median(edx$rating)
+med_rating
+```
+This shows that there are 10677 unique movies, 69878 unique users, and 797 unique genres.
+```{r}
+#Data visualization
+edx %>%
+  ggplot(aes(rating)) +
+  geom_histogram(binwidth = 0.5, color = "blue") +
+  xlab("Rating") +
+  ylab("Number of") +
+  ggtitle("Ratings Histogram") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+This plot shows that majority of movie ratings are 4, 3, 5 respectively.
+```{r}
+#Top 10 popular genres
+pop_genres <- edx %>%
+  group_by(genres) %>%
+  summarise(number = n()) %>%
+  arrange(desc(number))
+knitr::kable(head(pop_genres,10))
+```
+This shows that the most popular genre is Drama followed by Comedy
+```{r}
+#Ratings vs Users
+edx %>%
+  count(userId) %>%
+  ggplot(aes(n)) +
+  geom_histogram(color = "blue", bin = 30) +
+  scale_x_log10() +
+  xlab("Number of Ratings") +
+  ylab("Number of Users") +
+  ggtitle("Users vs Ratings") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+We can see from this plot that the users rate between 10 to 100 movies.
+```{r}
+#Data analysis
+mu <- mean(edx$rating)
+mu
+```
+```{r}
+#basic mean analysis
+rmse_basic <- RMSE(validation$rating, mu)
+rmse_basic
+```
+This prediction model uses the mean of the dataset to predict the rating for movies. The model assumes that all differences are due to random error.
+We see that RMSE from basic mean model is 1.060651
+```{r}
+#creating a table to display all the results of analysis
+rmse_table = tibble(Analysis = "Basic Analysis", RMSE = rmse_basic)
+rmse_table %>% knitr::kable()
+```
+Here we add the RMSE from basic mean model to a table for better display.
+```{r}
+#Introducing movie effect
+movie_effect <- edx %>%
+  group_by(movieId) %>%
+  summarise(a = mean(rating - mu))
+predict_ratings <- mu + validation %>%
+  left_join(movie_effect, by = "movieId") %>%
+  pull(a)
+rmse_movie_effect <- RMSE(predict_ratings, validation$rating)
+rmse_movie_effect
+```
+This time we introduce a bias to the model, this model calculates a bias term for each movie based on the difference between the movies mean rating and the overall mean rating.
+The RMSE of Movie Effect Model is 0.9437046
+```{r}
+#Adding Movie effect result to the table
+rmse_table <- bind_rows(rmse_table, tibble(Analysis = "Movie Effect Analysis", RMSE = rmse_movie_effect))
+rmse_table %>% knitr::kable()
+```
+We now add the results of the RMSE from Movie effect model to the table we have created previously.
+```{r}
+#Introducing user effect
+user_effect <- edx %>%
+  group_by(userId) %>%
+  summarise(b = mean(rating - mu))
+predict_ratings <- validation %>%
+  left_join(user_effect, by = "userId") %>%
+  pull(b)
+rmse_user_effect <- RMSE(predict_ratings, validation$rating)
+rmse_user_effect
+```
+This model calculates a biad term for each user based on the difference between the users maen rating and the overall mean rating.
+The RMSE of User Effect Model is 3.64577
+```{r}
+#Adding the User effect result to the table
+rmse_table <- bind_rows(rmse_table, tibble(Analysis = "User Effect Analysis", RMSE = rmse_user_effect))
+rmse_table %>% knitr::kable()
+```
+We added the User Effect Model to the table
+```{r}
+#Introducing genre effect
+genre_effect <- edx %>%
+  group_by(genres) %>%
+  summarise(c = mean(rating - mu))
+predict_ratings <- validation %>%
+  left_join(genre_effect, by = "genres") %>%
+  pull(c)
+rmse_genre_effect <- RMSE(predict_ratings, validation$rating)
+rmse_genre_effect
+```
+This model calculates a bias term for each genre based on the difference between the genres mean rating and the overall mean rating
+The RMSE of Genre Effect Model is 3.656522.
+```{r}
+#Adding Genre effect result to the table
+rmse_table <- bind_rows(rmse_table, tibble(Analysis = "Genre Effect Analysis", RMSE = rmse_genre_effect))
+rmse_table %>% knitr::kable()
+```
+In the following model we incorporate user effects to the model.
+```{r}
+#Introducing both movie and user effects
+user_effect <- edx %>%
+  left_join(movie_effect, by = "movieId") %>%
+  group_by(userId) %>%
+  summarise(a_u = mean(rating - mu - a))
+predict_ratings <- validation %>%
+  left_join(movie_effect, by = "movieId") %>%
+  left_join(user_effect, by = "userId") %>%
+  mutate(d = mu + a + a_u) %>%
+  pull(d)
+rmse_movie_user_effect <- RMSE(predict_ratings, validation$rating)
+rmse_movie_user_effect
+```
+The RMSE is 0.8655329
+We observe that the RMSE has significantly reduced from the previous models.
+```{r}
+#Addind Movie-User Effect result to the table
+rmse_table <- bind_rows(rmse_table, tibble(Analysis = "Movied & User Effect Analysis", RMSE = rmse_movie_user_effect))
+rmse_table %>% knitr::kable()
+```
+Regularization allows for reduced error in the model caused by the movies with fewer ratings compared to the other movies in the dataset.
+```{r}
+#regularization
+lambdas <- 10
+rmses <- sapply(lambdas, function(lambdas) {
+  mu <- mean(edx$rating)
+  x <- edx %>%
+    group_by(movieId) %>%
+    summarise(x = sum(rating - mu) / (n()+1))
+  y <- edx %>%
+    left_join(x, by = "movieId") %>%
+    group_by(userId) %>%
+    summarise(y = sum(rating - x - mu) / (n()+1))
+  
+  predicted_ratings <- validation %>%
+    left_join(x, by = "movieId") %>%
+    left_join(y, by = "userId") %>%
+    mutate(z = mu + x + y) %>%
+    pull(z)
+  return(RMSE(predicted_ratings, validation$rating))
+})
+rmse_regularization <- min(rmses)
+rmse_regularization
+```
+Here we see that the RMSE of regularized movie user effect is 0.8653141 which is even more reduced than the movie-user effect model as seen previously.
+```{r}
+#Adding the Regularization result to the table
+rmse_table <- bind_rows(rmse_table, tibble(Analysis = "Regularized Movie and User Effect", RMSE = rmse_regularization))
+rmse_table %>% knitr::kable()
+
+```
+This table shows all the RMSES from the models, and the best model for prediction is Regularized Movie User Effect Model.
+
+
+
+
+
+
+
